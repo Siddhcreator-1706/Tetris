@@ -7,6 +7,7 @@
 #include <fstream>
 #include <algorithm>
 #include <cstdlib>
+#include <ctime>
 
 using namespace std;
 
@@ -59,11 +60,11 @@ void ShowGameInstructions()
         "  DOWN_KEY   : Soft drop (move down faster)",
         "  SPACE: Hard drop (instant drop)",
         "  P    : Pause game",
-        "  Q    : Quit game"};
+        "  Ctrl + C    : Quit game"};
 
     for (size_t i = 0; i < instructions.size(); i++)
     {
-        mvprintw(9 + i, COLS / 2 - 20, "│%-42s│", instructions[i].c_str());
+        mvprintw(9 + i, COLS / 2 - 20, "%-42s", instructions[i].c_str());
     }
 
     mvprintw(9 + instructions.size(), COLS / 2 - 20, "                                                                                                      ");
@@ -127,8 +128,13 @@ void updateHighScores(int newScore)
         HighScore newEntry;
 
         // Get player name (you can modify this for your game's input method)
-        cout << "Congratulations! You made it to the top 5!\n";
-        cout << "Enter your name: ";
+
+        cout << "\033[33m"
+                "Congratulations! You made it to the top 5!\n"
+             << "\033[0m";
+        cout << "\033[31m"
+                "Enter your name: "
+             << "\033[0m";
         cin >> newEntry.playerName;
         newEntry.score = newScore;
 
@@ -152,7 +158,9 @@ void displayHighScores()
 {
     vector<HighScore> scores = readHighScores();
 
-    cout << "\n===== HIGH SCORES =====\n";
+    cout << "\033[36m"
+            "\n===== HIGH SCORES =====\n"
+         << "\033[0m";
     if (scores.empty())
     {
         cout << "No high scores yet!\n";
@@ -161,10 +169,12 @@ void displayHighScores()
     {
         for (size_t i = 0; i < scores.size(); ++i)
         {
-            cout << i + 1 << ". " << scores[i].playerName << " - " << scores[i].score << "\n";
+            cout << "\033[33m" << i + 1 << ". " << scores[i].playerName << " - " << "\033[0m" << scores[i].score << "\n";
         }
     }
-    cout << "======================\n\n";
+    cout << "\033[36m"
+            "======================\n\n"
+         << "\033[0m";
 }
 
 void ShowCountdownAnimation()
@@ -294,7 +304,7 @@ class Tetris
             {
                 if (linesCleared == 0)
                 {
-                    playSound();
+                    system("ffplay -nodisp -autoexit beep.wav 2>/dev/null &");
                 }
                 // Clear the line
                 for (int x = 1; x < FIELD_WIDTH - 1; x++)
@@ -338,13 +348,8 @@ class Tetris
             level++;
             linesCleared -= 5;
             speed = max(5, speed - 2);
-            playSound();
+            system("ffplay -nodisp -autoexit beep.wav 2>/dev/null &");
         }
-    }
-
-    void playSound()
-    {
-        system("ffplay -nodisp -autoexit beep.wav 2>/dev/null &");
     }
 
 public:
@@ -636,6 +641,7 @@ public:
         mvprintw(16, FIELD_WIDTH * 2 + 5, "DOWN_KEY : Soft Drop");
         mvprintw(17, FIELD_WIDTH * 2 + 5, "Space: Hard Drop");
         mvprintw(18, FIELD_WIDTH * 2 + 5, "P: Pause");
+	mvprintw(19, FIELD_WIDTH * 2 + 5, "Ctrl + C: Quit");
 
         if (isPaused)
         {
@@ -653,8 +659,9 @@ public:
 
 int main()
 {
-    ShowGameInstructions();
     initscr();
+    ShowGameInstructions();
+
     noecho();
     curs_set(0);
     nodelay(stdscr, TRUE);
@@ -708,7 +715,10 @@ int main()
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
     endwin();
-    cout << "Game Over! Final Score: " << game.GetScore() << endl;
+
+    cout << "\033[2J\033[1;1H";
+    cout << "\033[31m" << "Game Over! Final Score: " << game.GetScore() << endl
+         << "\033[0m";
 
     vector<HighScore> currentScores = readHighScores();
 
