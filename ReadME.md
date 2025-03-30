@@ -41,8 +41,8 @@
  
  #### 🐧 On Linux:
  ```bash
- g++ -o tetris tetris.cpp
- ./tetris
+ g++ -o Tetris Tetris.cpp -lncurses
+ ./Tetris
  ```
  
  ---
