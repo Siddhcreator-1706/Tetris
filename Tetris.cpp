@@ -1,14 +1,22 @@
 #include <iostream>
 #include <thread>
 #include <vector>
-#include <ncurses.h>
 #include <chrono>
 #include <queue>
 #include <fstream>
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
+#include <string>
 
+// Platform-specific includes
+#ifdef _WIN32
+#include <windows.h>
+#include <conio.h>
+#else
+#include <ncurses.h>
+#include <unistd.h>
+#endif
 using namespace std;
 
 // Constants
@@ -24,28 +32,111 @@ struct HighScore
     int score;
 };
 
+void ClearScreen()
+{
+#ifdef _WIN32
+    system("cls");
+#else
+    clear();
+#endif
+}
+void SetCursorPosition(int x, int y)
+{
+#ifdef _WIN32
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    COORD coord = {(SHORT)x, (SHORT)y};
+    SetConsoleCursorPosition(hConsole, coord);
+#else
+    printf("\033[%d;%dH", y + 1, x + 1);
+#endif
+}
+
+#ifdef _WIN32
+class ConsoleBuffer
+{
+private:
+    HANDLE hConsole;
+    CHAR_INFO *buffer;
+    COORD bufferSize;
+    COORD bufferCoord;
+    SMALL_RECT writeRegion;
+
+public:
+    ConsoleBuffer(int width, int height)
+    {
+        hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+        bufferSize = {(SHORT)width, (SHORT)height};
+        bufferCoord = {0, 0};
+        writeRegion = {0, 0, (SHORT)(width - 1), (SHORT)(height - 1)};
+        buffer = new CHAR_INFO[width * height];
+    }
+
+    ~ConsoleBuffer()
+    {
+        delete[] buffer;
+    }
+
+    void Clear(char fillChar = ' ', WORD attributes = 0)
+    {
+        for (int i = 0; i < bufferSize.X * bufferSize.Y; i++)
+        {
+            buffer[i].Char.UnicodeChar = fillChar;
+            buffer[i].Attributes = attributes;
+        }
+    }
+
+    void Write(int x, int y, const char *text, WORD attributes)
+    {
+        for (int i = 0; text[i] != '\0'; i++)
+        {
+            if (x + i < bufferSize.X && y < bufferSize.Y)
+            {
+                int index = y * bufferSize.X + x + i;
+                buffer[index].Char.UnicodeChar = text[i];
+                buffer[index].Attributes = attributes;
+            }
+        }
+    }
+
+    void Write(int x, int y, const wchar_t *text, WORD attributes)
+    {
+        for (int i = 0; text[i] != L'\0'; i++)
+        {
+            if (x + i < bufferSize.X && y < bufferSize.Y)
+            {
+                int index = y * bufferSize.X + x + i;
+                buffer[index].Char.UnicodeChar = text[i];
+                buffer[index].Attributes = attributes;
+            }
+        }
+    }
+
+    void Draw()
+    {
+        WriteConsoleOutput(hConsole, buffer, bufferSize, bufferCoord, &writeRegion);
+    }
+};
+#endif
+
 void ShowGameInstructions()
 {
-    clear();
+    ClearScreen();
 
-    // Enable colors if not already done
-    start_color();
-    init_pair(15, COLOR_CYAN, COLOR_BLACK);   // Title color
-    init_pair(16, COLOR_YELLOW, COLOR_BLACK); // Instruction color
-    init_pair(17, COLOR_GREEN, COLOR_BLACK);  // Key color
+#ifdef _WIN32
+    // Windows version using console API
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(hConsole, &csbi);
+    int consoleWidth = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+    int consoleHeight = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
 
     // Game Title
-    attron(COLOR_PAIR(15) | A_BOLD);
-    mvprintw(2, COLS / 2 - 10, "                                              ");
-    mvprintw(3, COLS / 2 - 10, "     TETRIS GAME    ");
-    mvprintw(4, COLS / 2 - 10, "                                              ");
-    attroff(COLOR_PAIR(1) | A_BOLD);
+    SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    std::cout << std::string(consoleWidth / 2 - 10, ' ') << "     TETRIS GAME    \n\n";
 
     // Instruction box
-    attron(COLOR_PAIR(16));
-    mvprintw(6, COLS / 2 - 20, "                                                                                                      ");
-    mvprintw(7, COLS / 2 - 20, "                HOW TO PLAY                 ");
-    mvprintw(8, COLS / 2 - 20, "                                                                                                      ");
+    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    std::cout << std::string(consoleWidth / 2 - 20, ' ') << "                HOW TO PLAY                 \n";
 
     // Instruction lines
     std::vector<std::string> instructions = {
@@ -55,20 +146,63 @@ void ShowGameInstructions()
         "  - Game ends when blocks reach the top",
         "",
         "  CONTROLS:",
-        "  LEFT_KEY , RIGHT_KEY : Move block left/right",
-        "  UP_KEY  : Rotate block",
-        "  DOWN_KEY   : Soft drop (move down faster)",
+        "  LEFT_ARROW, RIGHT_ARROW : Move block left/right",
+        "  UP_ARROW : Rotate block",
+        "  DOWN_ARROW : Soft drop (move down faster)",
         "  SPACE: Hard drop (instant drop)",
-        "  P    : Pause game",
-        "  Ctrl + C    : Quit game"};
+        "  S : Pause game",
+        "  Ctrl + C : Quit game"};
+
+    for (const auto &line : instructions)
+    {
+        std::cout << std::string(consoleWidth / 2 - 20, ' ') << line << "\n";
+    }
+
+    // Prompt to continue
+    SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    std::cout << "\n"
+              << std::string(consoleWidth / 2 - 15, ' ')
+              << "Press any key to return to the game...";
+
+    _getch();                                            // Wait for any key press
+    SetConsoleTextAttribute(hConsole, csbi.wAttributes); // Restore original colors
+
+#else
+    // Linux version using ncurses
+    initscr();
+    start_color();
+    init_pair(15, COLOR_CYAN, COLOR_BLACK);
+    init_pair(16, COLOR_YELLOW, COLOR_BLACK);
+    init_pair(17, COLOR_GREEN, COLOR_BLACK);
+
+    // Game Title
+    attron(COLOR_PAIR(15) | A_BOLD);
+    mvprintw(2, COLS / 2 - 10, "     TETRIS GAME    ");
+    attroff(COLOR_PAIR(15) | A_BOLD);
+
+    // Instruction box
+    attron(COLOR_PAIR(16));
+    mvprintw(7, COLS / 2 - 20, "                HOW TO PLAY                 ");
+
+    // Instruction lines
+    std::vector<std::string> instructions = {
+        "  - Arrange the falling blocks to complete lines",
+        "  - Complete lines to earn points and level up",
+        "  - The game speeds up as you progress levels",
+        "  - Game ends when blocks reach the top",
+        "",
+        "  CONTROLS:",
+        "  LEFT_KEY, RIGHT_KEY : Move block left/right",
+        "  UP_KEY : Rotate block",
+        "  DOWN_KEY : Soft drop (move down faster)",
+        "  SPACE: Hard drop (instant drop)",
+        "  P : Pause game",
+        "  Ctrl+C : Quit game"};
 
     for (size_t i = 0; i < instructions.size(); i++)
     {
         mvprintw(9 + i, COLS / 2 - 20, "%-42s", instructions[i].c_str());
     }
-
-    mvprintw(9 + instructions.size(), COLS / 2 - 20, "                                                                                                      ");
-    attroff(COLOR_PAIR(16));
 
     // Prompt to continue
     attron(COLOR_PAIR(17) | A_BOLD);
@@ -76,7 +210,9 @@ void ShowGameInstructions()
     attroff(COLOR_PAIR(17) | A_BOLD);
 
     refresh();
-    getch(); // Wait for any key press
+    getch();
+    endwin();
+#endif
 }
 
 // Function to read high scores from file
@@ -179,6 +315,46 @@ void displayHighScores()
 
 void ShowCountdownAnimation()
 {
+#ifdef _WIN32
+    // Windows version
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(hConsole, &csbi);
+
+    int startX = csbi.srWindow.Right / 2;
+    int startY = csbi.srWindow.Bottom / 2;
+
+    // Hide cursor
+    CONSOLE_CURSOR_INFO cursorInfo;
+    GetConsoleCursorInfo(hConsole, &cursorInfo);
+    cursorInfo.bVisible = false;
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+
+    for (int i = 3; i > 0; i--)
+    {
+        ClearScreen();
+        SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+        COORD coord = {(SHORT)startX, (SHORT)startY};
+        SetConsoleCursorPosition(hConsole, coord);
+        Beep(800, 300);
+        std::cout << i;
+        Sleep((1000));
+    }
+
+    ClearScreen();
+    SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+    COORD coord = {(SHORT)(startX - 5), (SHORT)startY};
+    SetConsoleCursorPosition(hConsole, coord);
+    std::cout << "Game Start!";
+    Sleep((1000));
+    ClearScreen();
+
+    // Restore cursor
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+    SetConsoleTextAttribute(hConsole, csbi.wAttributes);
+
+#else
+    // Linux version (using ncurses)
     initscr();
     noecho();
     curs_set(0);
@@ -205,10 +381,62 @@ void ShowCountdownAnimation()
     attroff(COLOR_PAIR(9) | A_BOLD);
     refresh();
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    endwin();
+#endif
 }
 
 void ShowGameOverAnimation()
 {
+#ifdef _WIN32
+    // Windows version
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(hConsole, &csbi);
+
+    int startX = (csbi.srWindow.Right / 2) - 5;
+    int startY = csbi.srWindow.Bottom / 2;
+
+    // Hide cursor
+    CONSOLE_CURSOR_INFO cursorInfo;
+    GetConsoleCursorInfo(hConsole, &cursorInfo);
+    cursorInfo.bVisible = false;
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+
+    const char *gameOverText = "GAME OVER";
+
+    for (int i = 0; i < 5; i++)
+    {
+        ClearScreen();
+        SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+
+        COORD coord = {(SHORT)startX, (SHORT)startY};
+        SetConsoleCursorPosition(hConsole, coord);
+
+        // Windows doesn't have direct blink, so we'll simulate it
+        if (i % 2 == 0)
+        {
+            std::cout << gameOverText;
+        }
+        else
+        {
+            // Just move cursor to same position without printing
+            SetConsoleCursorPosition(hConsole, coord);
+        }
+
+        Sleep(400);
+    }
+
+    // Final display
+    SetConsoleCursorPosition(hConsole, {(SHORT)startX, (SHORT)startY});
+    std::cout << gameOverText;
+    Sleep((1000));
+
+    // Restore cursor and colors
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+    SetConsoleTextAttribute(hConsole, csbi.wAttributes);
+
+#else
+    // Linux version (using ncurses)
     initscr();
     noecho();
     curs_set(0);
@@ -234,15 +462,25 @@ void ShowGameOverAnimation()
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     endwin();
+#endif
 }
 
 class Tetris
 {
+private:
     vector<vector<int>> field{FIELD_HEIGHT, vector<int>(FIELD_WIDTH, 0)};
-    int currentPiece{rand() % 7}, nextPiece{rand() % 7}, currentRotation{},
-        currentX{FIELD_WIDTH / 2 - 2}, currentY{1}; // Start at y=1 below top border
-    int score{}, level{1}, speed{10}, linesCleared{};
-    bool isGameOver{}, isPaused{};
+    int currentPiece, nextPiece, currentRotation;
+    int currentX, currentY;
+    int score, level, speed, linesCleared;
+    bool isGameOver, isPaused;
+#ifdef _WIN32
+    ConsoleBuffer screenBuffer;
+#endif
+
+#ifdef _WIN32
+    HANDLE hConsole;
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+#endif
 
     int Rotate(int px, int py, int r)
     {
@@ -273,11 +511,8 @@ class Tetris
                 int fx = posX + px;
                 int fy = posY + py;
 
-                // Check boundaries (including top border at y=0)
                 if (fx < 0 || fx >= FIELD_WIDTH || fy < 0 || fy >= FIELD_HEIGHT)
                     return false;
-
-                // Check collision with existing pieces
                 if (field[fy][fx] != 0)
                     return false;
             }
@@ -289,7 +524,7 @@ class Tetris
     {
         int linesClearedThisTurn = 0;
         for (int y = FIELD_HEIGHT - 2; y >= 1; y--)
-        { // Start from bottom, stop at top border
+        {
             bool isLineComplete = true;
             for (int x = 1; x < FIELD_WIDTH - 1; x++)
             {
@@ -302,15 +537,21 @@ class Tetris
 
             if (isLineComplete)
             {
+                // Play sound (platform independent)
+#ifdef _WIN32
+                Beep(2000, 500);
+#else
                 if (linesCleared == 0)
                 {
                     system("ffplay -nodisp -autoexit beep.wav 2>/dev/null &");
                 }
+#endif
+
                 // Clear the line
                 for (int x = 1; x < FIELD_WIDTH - 1; x++)
                     field[y][x] = 0;
 
-                // Shift all lines above down
+                // Shift lines down
                 for (int yy = y - 1; yy >= 1; yy--)
                 {
                     for (int x = 1; x < FIELD_WIDTH - 1; x++)
@@ -320,7 +561,7 @@ class Tetris
                     }
                 }
                 linesClearedThisTurn++;
-                y++; // Re-check this line after shift
+                y++; // Re-check this line
             }
         }
 
@@ -342,56 +583,88 @@ class Tetris
         }
         linesCleared += linesClearedThisTurn;
 
-        // Level up every 5 lines
+        // Level up
         if (linesCleared >= 5)
         {
             level++;
             linesCleared -= 5;
             speed = max(5, speed - 2);
+#ifdef _WIN32
+            Beep(880, 200);
+#else
             system("ffplay -nodisp -autoexit beep.wav 2>/dev/null &");
+#endif
         }
     }
 
 public:
-    Tetris()
+    Tetris() : currentPiece(rand() % 7), nextPiece(rand() % 7), currentRotation(0),
+               currentX(FIELD_WIDTH / 2 - 2), currentY(1), score(0), level(1),
+               speed(10), linesCleared(0), isGameOver(false), isPaused(false)
+#ifdef _WIN32
+               ,
+               screenBuffer(FIELD_WIDTH * 2 + 30, FIELD_HEIGHT + 2)
+#endif
     {
-        // Initialize borders (left, right, top, bottom)
+
+        // Initialize borders
         for (int y = 0; y < FIELD_HEIGHT; y++)
         {
-            field[y][0] = 8;               // Left border
-            field[y][FIELD_WIDTH - 1] = 8; // Right border
+            field[y][0] = 8;
+            field[y][FIELD_WIDTH - 1] = 8;
         }
         for (int x = 0; x < FIELD_WIDTH; x++)
         {
-            field[0][x] = 8;                // Top border
-            field[FIELD_HEIGHT - 1][x] = 8; // Bottom border
+            field[0][x] = 8;
+            field[FIELD_HEIGHT - 1][x] = 8;
         }
+
+#ifdef _WIN32
+        hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+        GetConsoleScreenBufferInfo(hConsole, &csbi);
+#endif
     }
 
     void ProcessInput(int ch)
     {
         if (isPaused)
         {
-            if (ch == 'p' || ch == 'P')
+            if (ch == 's' || ch == 'S')
                 isPaused = false;
             return;
         }
 
         switch (ch)
         {
+#ifdef _WIN32
+        case 75: // Left arrow
+#else
         case KEY_LEFT:
+#endif
             if (DoesPieceFit(currentPiece, currentRotation, currentX - 1, currentY))
                 currentX--;
             break;
+#ifdef _WIN32
+        case 77: // Right arrow
+#else
         case KEY_RIGHT:
+#endif
             if (DoesPieceFit(currentPiece, currentRotation, currentX + 1, currentY))
                 currentX++;
             break;
+#ifdef _WIN32
+        case 72: // Up arrow
+#else
         case KEY_UP:
+#endif
             if (DoesPieceFit(currentPiece, currentRotation + 1, currentX, currentY))
                 currentRotation++;
             break;
+#ifdef _WIN32
+        case 80: // Down arrow
+#else
         case KEY_DOWN:
+#endif
             if (DoesPieceFit(currentPiece, currentRotation, currentX, currentY + 1))
                 currentY++;
             break;
@@ -399,8 +672,8 @@ public:
             while (DoesPieceFit(currentPiece, currentRotation, currentX, currentY + 1))
                 currentY++;
             break;
-        case 'p':
-        case 'P':
+        case 's':
+        case 'S':
             isPaused = true;
             break;
         }
@@ -408,7 +681,8 @@ public:
 
     void AppleGravity()
     {
-        bool visited[FIELD_HEIGHT][FIELD_WIDTH] = {false};
+        // Create a visited matrix to track which cells we've processed
+        vector<vector<bool>> visited(FIELD_HEIGHT, vector<bool>(FIELD_WIDTH, false));
 
         // Process from bottom to top (skip borders)
         for (int y = FIELD_HEIGHT - 2; y >= 1; y--)
@@ -420,85 +694,96 @@ public:
                     int pieceID = field[y][x];
                     vector<pair<int, int>> cluster;
                     queue<pair<int, int>> toVisit;
-                    toVisit.push({y, x});
+                    toVisit.push(make_pair(y, x));
 
-                    // Find all connected blocks
+                    // Find all connected blocks of the same type
                     while (!toVisit.empty())
                     {
-                        auto [cy, cx] = toVisit.front();
+                        pair<int, int> current = toVisit.front();
                         toVisit.pop();
+                        int cy = current.first;
+                        int cx = current.second;
+
+                        if (cy < 1 || cy >= FIELD_HEIGHT - 1 || cx < 1 || cx >= FIELD_WIDTH - 1)
+                            continue;
 
                         if (visited[cy][cx] || field[cy][cx] != pieceID)
                             continue;
-                        visited[cy][cx] = true;
-                        cluster.push_back({cy, cx});
 
-                        // Check neighbors
-                        if (cy > 1 && field[cy - 1][cx] == pieceID)
-                            toVisit.push({cy - 1, cx});
-                        if (cy < FIELD_HEIGHT - 1 && field[cy + 1][cx] == pieceID)
-                            toVisit.push({cy + 1, cx});
-                        if (cx > 0 && field[cy][cx - 1] == pieceID)
-                            toVisit.push({cy, cx - 1});
-                        if (cx < FIELD_WIDTH - 1 && field[cy][cx + 1] == pieceID)
-                            toVisit.push({cy, cx + 1});
+                        visited[cy][cx] = true;
+                        cluster.push_back(make_pair(cy, cx));
+
+                        // Check all 4-directional neighbors
+                        if (cy > 1 && !visited[cy - 1][cx])
+                            toVisit.push(make_pair(cy - 1, cx));
+                        if (cy < FIELD_HEIGHT - 2 && !visited[cy + 1][cx])
+                            toVisit.push(make_pair(cy + 1, cx));
+                        if (cx > 1 && !visited[cy][cx - 1])
+                            toVisit.push(make_pair(cy, cx - 1));
+                        if (cx < FIELD_WIDTH - 2 && !visited[cy][cx + 1])
+                            toVisit.push(make_pair(cy, cx + 1));
                     }
 
-                    // Check if cluster is floating
+                    // Check if this cluster is floating
                     bool isFloating = true;
-                    for (auto [cy, cx] : cluster)
+                    for (const auto &block : cluster)
                     {
-                        if (cy + 1 < FIELD_HEIGHT &&
-                            field[cy + 1][cx] != 0 &&
-                            field[cy + 1][cx] != pieceID)
+                        int belowY = block.first + 1;
+                        // If we hit bottom or a non-empty, non-matching block below
+                        if (belowY >= FIELD_HEIGHT - 1 ||
+                            (field[belowY][block.second] != 0 && field[belowY][block.second] != pieceID))
                         {
                             isFloating = false;
                             break;
                         }
                     }
 
-                    // Move cluster down if floating
-                    if (isFloating)
+                    // If floating, move the entire cluster down as far as possible
+                    if (isFloating && !cluster.empty())
                     {
-                        bool canMove = true;
-                        while (canMove)
+                        // Find how far we can drop the cluster
+                        int maxDrop = FIELD_HEIGHT;
+                        for (const auto &block : cluster)
                         {
-                            for (auto [cy, cx] : cluster)
+                            int drop = 0;
+                            while (block.first + drop + 1 < FIELD_HEIGHT - 1 &&
+                                   field[block.first + drop + 1][block.second] == 0)
                             {
-                                if (cy + 1 >= FIELD_HEIGHT ||
-                                    (field[cy + 1][cx] != 0 && field[cy + 1][cx] != pieceID))
-                                {
-                                    canMove = false;
-                                    break;
-                                }
+                                drop++;
                             }
-                            if (canMove)
-                            {
-                                for (int i = cluster.size() - 1; i >= 0; i--)
-                                {
-                                    auto [cy, cx] = cluster[i];
-                                    field[cy + 1][cx] = field[cy][cx];
-                                    field[cy][cx] = 0;
-                                }
-                                for (auto &block : cluster)
-                                    block.first++;
-                            }
+                            maxDrop = min(maxDrop, drop);
+                        }
+
+                        // Sort cluster by bottom blocks first to prevent overwriting
+                        sort(cluster.begin(), cluster.end(), [](const pair<int, int> &a, const pair<int, int> &b)
+                             { return a.first > b.first; });
+
+                        // Move each block down by maxDrop
+                        for (auto &block : cluster)
+                        {
+                            field[block.first + maxDrop][block.second] = pieceID;
+                            field[block.first][block.second] = 0;
                         }
                     }
                 }
             }
         }
     }
-
     void Update()
     {
         if (isPaused || isGameOver)
             return;
 
-        static int speedCount = 0;
-        if (++speedCount == speed)
+        static auto lastUpdate = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count();
+
+        // Calculate speed based on level (faster as level increases)
+        int currentSpeed = max(50, 500 - (level * 30)); // Adjust these values as needed
+
+        if (elapsed >= currentSpeed)
         {
-            speedCount = 0;
+            lastUpdate = now;
 
             if (DoesPieceFit(currentPiece, currentRotation, currentX, currentY + 1))
             {
@@ -506,9 +791,14 @@ public:
             }
             else
             {
+#ifdef _WIN32
+                Beep(420, 200);
+#else
                 system("ffplay -nodisp -autoexit beep-07a.wav 2>/dev/null &");
+#endif
                 score += 10 * level;
-                // Lock the piece in place
+
+                // Lock piece
                 for (int px = 0; px < TETROMINO_SIZE; px++)
                 {
                     for (int py = 0; py < TETROMINO_SIZE; py++)
@@ -520,24 +810,24 @@ public:
                     }
                 }
 
-                // Check if piece is above the play area (game over)
+                // Game over check
                 if (currentY <= 1)
                 {
                     isGameOver = true;
                     return;
                 }
 
-                AppleGravity();
+                
                 ClearLines();
+                AppleGravity();
 
-                // Spawn new piece
+                // New piece
                 currentX = FIELD_WIDTH / 2 - 2;
-                currentY = 1; // Spawn below top border
+                currentY = 1;
                 currentRotation = 0;
                 currentPiece = nextPiece;
                 nextPiece = rand() % 7;
 
-                // Check if new piece fits
                 if (!DoesPieceFit(currentPiece, currentRotation, currentX, currentY))
                 {
                     isGameOver = true;
@@ -545,9 +835,87 @@ public:
             }
         }
     }
-
     void Draw()
     {
+#ifdef _WIN32
+        // Clear the buffer
+        screenBuffer.Clear();
+
+        // Draw border and field
+        for (int y = 0; y < FIELD_HEIGHT; y++)
+        {
+            for (int x = 0; x < FIELD_WIDTH; x++)
+            {
+                int cell = field[y][x];
+                if (cell > 0 && cell < 8)
+                {
+                    screenBuffer.Write(x * 2, y, "[]", cell + 8);
+                }
+                else if (cell == 8)
+                {
+                    screenBuffer.Write(x * 2, y, "##", 15);
+                }
+            }
+        }
+
+        // Draw current piece
+        for (int px = 0; px < TETROMINO_SIZE; px++)
+        {
+            for (int py = 0; py < TETROMINO_SIZE; py++)
+            {
+                if (TETROMINOS[currentPiece][Rotate(px, py, currentRotation)] != L'.')
+                {
+                    screenBuffer.Write((currentX + px) * 2, currentY + py, "[]", currentPiece + 9);
+                }
+            }
+        }
+
+        // Draw next piece preview
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 1, "Next:", 15);
+
+        // Clear preview area
+        for (int y = 2; y <= 7; y++)
+        {
+            for (int x = FIELD_WIDTH * 2 + 5; x <= FIELD_WIDTH * 2 + 14; x++)
+            {
+                screenBuffer.Write(x, y, "  ", 0);
+            }
+        }
+
+        // Draw next piece
+        int baseX = FIELD_WIDTH * 2 + 8;
+        int baseY = 4;
+        for (int px = 0; px < TETROMINO_SIZE; px++)
+        {
+            for (int py = 0; py < TETROMINO_SIZE; py++)
+            {
+                if (TETROMINOS[nextPiece][Rotate(px, py, 0)] != L'.')
+                {
+                    int drawX = baseX + (px - 1) * 2;
+                    int drawY = baseY + (py - 1);
+                    screenBuffer.Write(drawX, drawY, "[]", nextPiece + 9);
+                }
+            }
+        }
+
+        // Draw game info
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 9, ("Score: " + to_string(score)).c_str(), 15);
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 10, ("Level: " + to_string(level)).c_str(), 15);
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 11, ("Lines: " + to_string(linesCleared)).c_str(), 15);
+
+        // Draw controls
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 13, "Controls:", 15);
+        // ... add other controls text similarly ...
+
+        if (isPaused)
+        {
+            screenBuffer.Write(FIELD_WIDTH - 4, FIELD_HEIGHT / 2, "PAUSED", 15);
+        }
+
+        // Draw everything at once
+        screenBuffer.Draw();
+#else
+        // Linux/Unix version using ncurses
         erase();
 
         // Draw border
@@ -600,19 +968,22 @@ public:
         }
 
         // Draw next piece preview
+        attron(A_BOLD);
         mvprintw(1, FIELD_WIDTH * 2 + 5, "Next Piece:");
-        attron(COLOR_PAIR(8));
-        for (int x = 0; x < 10; x++)
+        attroff(A_BOLD);
+
+        // Clear preview area (6 rows x 8 columns to fit all pieces)
+        for (int y = 2; y <= 7; y++)
         {
-            mvprintw(2, FIELD_WIDTH * 2 + 5 + x, "  ");
-            mvprintw(7, FIELD_WIDTH * 2 + 5 + x, "  ");
+            for (int x = FIELD_WIDTH * 2 + 5; x <= FIELD_WIDTH * 2 + 12; x += 2)
+            {
+                mvprintw(y, x, "  ");
+            }
         }
-        for (int y = 0; y < 5; y++)
-        {
-            mvprintw(2 + y, FIELD_WIDTH * 2 + 5, "  ");
-            mvprintw(2 + y, FIELD_WIDTH * 2 + 14, "  ");
-        }
-        attroff(COLOR_PAIR(8));
+
+        // Draw next piece (centered in the preview area)
+        int baseX = FIELD_WIDTH * 2 + 7; // Adjusted for better centering
+        int baseY = 4;                   // Middle of the preview area
 
         for (int px = 0; px < TETROMINO_SIZE; px++)
         {
@@ -620,8 +991,11 @@ public:
             {
                 if (TETROMINOS[nextPiece][Rotate(px, py, 0)] != L'.')
                 {
+                    // Center the piece in the preview area
+                    int drawX = baseX + (px - 1) * 2;
+                    int drawY = baseY + (py - 1);
                     attron(COLOR_PAIR(nextPiece + 1));
-                    mvprintw(4 + py, FIELD_WIDTH * 2 + 8 + px * 2, "  ");
+                    mvprintw(drawY, drawX, "  ");
                     attroff(COLOR_PAIR(nextPiece + 1));
                 }
             }
@@ -636,12 +1010,12 @@ public:
 
         // Draw controls
         mvprintw(13, FIELD_WIDTH * 2 + 5, "Controls:");
-        mvprintw(14, FIELD_WIDTH * 2 + 5, "LEFT_KEY , RIGHT_KEY  : Move");
-        mvprintw(15, FIELD_WIDTH * 2 + 5, "UP_KEY : Rotate");
-        mvprintw(16, FIELD_WIDTH * 2 + 5, "DOWN_KEY : Soft Drop");
+        mvprintw(14, FIELD_WIDTH * 2 + 5, "LEFT/RIGHT: Move");
+        mvprintw(15, FIELD_WIDTH * 2 + 5, "UP: Rotate");
+        mvprintw(16, FIELD_WIDTH * 2 + 5, "DOWN: Soft Drop");
         mvprintw(17, FIELD_WIDTH * 2 + 5, "Space: Hard Drop");
         mvprintw(18, FIELD_WIDTH * 2 + 5, "P: Pause");
-	mvprintw(19, FIELD_WIDTH * 2 + 5, "Ctrl + C: Quit");
+        mvprintw(19, FIELD_WIDTH * 2 + 5, "Ctrl+C: Quit");
 
         if (isPaused)
         {
@@ -651,6 +1025,7 @@ public:
         }
 
         refresh();
+#endif
     }
 
     bool IsGameOver() const { return isGameOver; }
@@ -659,77 +1034,125 @@ public:
 
 int main()
 {
+    // Initialize random seed
+    srand(time(0));
+
+#ifdef _WIN32
+    // Windows initialization
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_CURSOR_INFO cursorInfo;
+    GetConsoleCursorInfo(hConsole, &cursorInfo);
+    cursorInfo.bVisible = false;
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+
+    // Set console title
+    SetConsoleTitleA("Tetris Game");
+
+    // Set console size
+    SMALL_RECT windowSize = {0, 0, 79, 49}; // 80x50
+    SetConsoleWindowInfo(hConsole, TRUE, &windowSize);
+#else
+    // Linux initialization (ncurses)
     initscr();
     ShowGameInstructions();
-
     noecho();
     curs_set(0);
     nodelay(stdscr, TRUE);
     keypad(stdscr, TRUE);
     start_color();
 
-    // Color pairs
+    // Initialize color pairs
     init_pair(1, COLOR_BLACK, COLOR_CYAN);    // I
     init_pair(2, COLOR_BLACK, COLOR_BLUE);    // J
-    init_pair(3, COLOR_BLACK, 208);           // L (orange)
+    init_pair(3, COLOR_BLACK, 208);           // L (using yellow for orange)
     init_pair(4, COLOR_BLACK, COLOR_YELLOW);  // O
     init_pair(5, COLOR_BLACK, COLOR_GREEN);   // S
     init_pair(6, COLOR_BLACK, COLOR_MAGENTA); // T
     init_pair(7, COLOR_BLACK, COLOR_RED);     // Z
     init_pair(8, COLOR_RED, COLOR_WHITE);     // Border
+#endif
 
     Tetris game;
 
+    // Play start sound
+#ifdef _WIN32
+    ShowGameInstructions();
+
+    Beep(523, 200); // C note
+    Beep(659, 200); // E note
+    Beep(784, 200); // G note
+#else
     system("ffplay -nodisp -autoexit game_start.mp3 2>/dev/null &");
+#endif
+
     ShowCountdownAnimation();
 
+    // Main game loop
     while (!game.IsGameOver())
     {
+#ifdef _WIN32
+        if (_kbhit())
+        {
+            int ch = _getch();
+            // Handle arrow keys (Windows returns two codes for arrows)
+            if (ch == 0 || ch == 224)
+            {
+                ch = _getch(); // Get the actual key code
+            }
+            game.ProcessInput(ch);
+        }
+#else
         int ch = getch();
-        game.ProcessInput(ch);
+        if (ch != ERR)
+        {
+            game.ProcessInput(ch);
+            // Clear any additional buffered input
+            flushinp();
+        }
+#endif
+
         game.Update();
         game.Draw();
-        this_thread::sleep_for(chrono::milliseconds(50));
-    }
 
-    system("ffplay -nodisp -autoexit game_over.mp3 2>/dev/null &");
+        // Use proper sleep for Linux
+#ifdef _WIN32
+        Sleep(50);
+
+        Beep(523, 200); // C note
+        Beep(659, 200); // E note
+        Beep(784, 200); // G note
+#else
+        usleep(50000); // 50ms in microseconds
+#endif
+    }
     ShowGameOverAnimation();
-    int startX = COLS / 2 - 5;
-    int startY = LINES / 2;
 
-    const char *gameOverText = "SCORE : ";
-
-    for (int i = 0; i < 5; i++)
-    {
-        clear();
-        attron(COLOR_PAIR(11) | A_BOLD);
-        if (i % 2 == 0)
-            attron(A_BLINK);
-        mvprintw(startY, startX, "%s", gameOverText);
-        mvprintw(startY, startX + 7, "%d", game.GetScore());
-        attroff(A_BLINK);
-        refresh();
-        std::this_thread::sleep_for(std::chrono::milliseconds(400));
-    }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
+    // Display final score and high scores
+#ifdef _WIN32
+    system("cls");
+    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_INTENSITY);
+    cout << "Game Over! Final Score: " << game.GetScore() << endl;
+    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+#else
     endwin();
-
-    cout << "\033[2J\033[1;1H";
     cout << "\033[31m" << "Game Over! Final Score: " << game.GetScore() << endl
          << "\033[0m";
+#endif
 
     vector<HighScore> currentScores = readHighScores();
-
-    // Check if score qualifies for high score list
     if (currentScores.size() < 5 || game.GetScore() > currentScores.back().score)
     {
         updateHighScores(game.GetScore());
     }
-
-    // Display high scores
     displayHighScores();
+
+#ifdef _WIN32
+    // Restore console settings
+    SetConsoleCursorInfo(hConsole, &cursorInfo);
+    SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+#else
+    // Ncurses already cleaned up by endwin()
+#endif
 
     return 0;
 }
