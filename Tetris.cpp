@@ -1020,18 +1020,18 @@ public:
         // Top border
         for (int x = FIELD_WIDTH * 2 + 5; x <= FIELD_WIDTH * 2 + 15; x++)
         {
-            mvprintw(1, x, "#");
+            mvprintw(1, x, " ");
         }
         // Bottom border
         for (int x = FIELD_WIDTH * 2 + 5; x <= FIELD_WIDTH * 2 + 15; x++)
         {
-            mvprintw(7, x, "#");
+            mvprintw(7, x, " ");
         }
         // Side borders
         for (int y = 2; y <= 6; y++)
         {
-            mvprintw(y, FIELD_WIDTH * 2 + 5, "#");
-            mvprintw(y, FIELD_WIDTH * 2 + 15, "#");
+            mvprintw(y, FIELD_WIDTH * 2 + 5, " ");
+            mvprintw(y, FIELD_WIDTH * 2 + 15, " ");
         }
         attroff(COLOR_PAIR(8));
 

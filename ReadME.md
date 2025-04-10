@@ -39,6 +39,12 @@
  ### ⚙️ Build and Run
  Ensure you have a C++ compiler installed (e.g., `g++` for Linux).
  
+ #### 🪟 On Windows:
+ ```bash
+ g++  Tetris.cpp  -o Tetris
+ ./Tetris
+ ```
+
  #### 🐧 On Linux:
  ```bash
  g++ -o Tetris Tetris.cpp -lncurses
@@ -61,9 +67,9 @@
  | ⬆️ Up Arrow    | Rotate piece |
  | ⬇️ Down Arrow  | Speed up fall |
  | Spacebar       | Hard drop |
- | P             | Pause the game |
- | Ctrl + C             | Quit the game |
- 
+ | S             | Pause the game |
+ | Ctrl + C  or Esc       | Quit the game |
+  
  ---
  ## 🏆 Scoring System
  - **1 Line Cleared** ➝ `100` Points
@@ -173,6 +179,3 @@
  - [Keval-tech](https://github.com/Keval-tech)
  - [khushis02](https://github.com/khushis02)
  ---
- 
- ## 📜 License
- This project is **open-source** and available under the **MIT License**.
