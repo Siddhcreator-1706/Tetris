@@ -52,6 +52,20 @@ void SetCursorPosition(int x, int y)
 }
 
 #ifdef _WIN32
+void FlushInputBuffer()
+{
+    // Flush the console input buffer
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+
+    // Also clear any remaining characters in the buffer
+    while (_kbhit())
+    {
+        _getch();
+    }
+}
+#endif
+
+#ifdef _WIN32
 class ConsoleBuffer
 {
 private:
@@ -60,15 +74,17 @@ private:
     COORD bufferSize;
     COORD bufferCoord;
     SMALL_RECT writeRegion;
+    vector<vector<bool>> dirtyCells;
 
 public:
-    ConsoleBuffer(int width, int height)
+    ConsoleBuffer(int width, int height) : bufferSize({(SHORT)width, (SHORT)height}),
+                                           dirtyCells(height, vector<bool>(width, true))
     {
         hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-        bufferSize = {(SHORT)width, (SHORT)height};
         bufferCoord = {0, 0};
         writeRegion = {0, 0, (SHORT)(width - 1), (SHORT)(height - 1)};
         buffer = new CHAR_INFO[width * height];
+        Clear();
     }
 
     ~ConsoleBuffer()
@@ -83,6 +99,11 @@ public:
             buffer[i].Char.UnicodeChar = fillChar;
             buffer[i].Attributes = attributes;
         }
+        // Mark all cells as dirty
+        for (auto &row : dirtyCells)
+        {
+            fill(row.begin(), row.end(), true);
+        }
     }
 
     void Write(int x, int y, const char *text, WORD attributes)
@@ -94,26 +115,40 @@ public:
                 int index = y * bufferSize.X + x + i;
                 buffer[index].Char.UnicodeChar = text[i];
                 buffer[index].Attributes = attributes;
+                dirtyCells[y][x + i] = true;
             }
         }
     }
 
-    void Write(int x, int y, const wchar_t *text, WORD attributes)
+    void Fill(int x, int y, int width, int height, char fillChar, WORD attributes)
     {
-        for (int i = 0; text[i] != L'\0'; i++)
+        for (int i = y; i < y + height && i < bufferSize.Y; i++)
         {
-            if (x + i < bufferSize.X && y < bufferSize.Y)
+            for (int j = x; j < x + width && j < bufferSize.X; j++)
             {
-                int index = y * bufferSize.X + x + i;
-                buffer[index].Char.UnicodeChar = text[i];
+                int index = i * bufferSize.X + j;
+                buffer[index].Char.UnicodeChar = fillChar;
                 buffer[index].Attributes = attributes;
+                dirtyCells[i][j] = true;
             }
         }
     }
 
     void Draw()
     {
+        // Only write the dirty regions to console
+        vector<SMALL_RECT> dirtyRegions;
+        // Simple implementation - could be optimized further
+        // by merging adjacent dirty regions
+
+        // For now, we'll just write the entire buffer
         WriteConsoleOutput(hConsole, buffer, bufferSize, bufferCoord, &writeRegion);
+
+        // Clear dirty flags
+        for (auto &row : dirtyCells)
+        {
+            fill(row.begin(), row.end(), false);
+        }
     }
 };
 #endif
@@ -132,14 +167,14 @@ void ShowGameInstructions()
 
     // Game Title
     SetConsoleTextAttribute(hConsole, FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-    std::cout << std::string(consoleWidth / 2 - 10, ' ') << "     TETRIS GAME    \n\n";
+    cout << string(consoleWidth / 2 - 10, ' ') << "     TETRIS GAME    \n\n";
 
     // Instruction box
     SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-    std::cout << std::string(consoleWidth / 2 - 20, ' ') << "                HOW TO PLAY                 \n";
+    cout << string(consoleWidth / 2 - 20, ' ') << "                HOW TO PLAY                 \n";
 
     // Instruction lines
-    std::vector<std::string> instructions = {
+    vector<string> instructions = {
         "  - Arrange the falling blocks to complete lines",
         "  - Complete lines to earn points and level up",
         "  - The game speeds up as you progress levels",
@@ -155,14 +190,14 @@ void ShowGameInstructions()
 
     for (const auto &line : instructions)
     {
-        std::cout << std::string(consoleWidth / 2 - 20, ' ') << line << "\n";
+        cout << string(consoleWidth / 2 - 20, ' ') << line << "\n";
     }
 
     // Prompt to continue
     SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
-    std::cout << "\n"
-              << std::string(consoleWidth / 2 - 15, ' ')
-              << "Press any key to return to the game...";
+    cout << "\n"
+         << string(consoleWidth / 2 - 15, ' ')
+         << "Press any key to return to the game...";
 
     _getch();                                            // Wait for any key press
     SetConsoleTextAttribute(hConsole, csbi.wAttributes); // Restore original colors
@@ -185,7 +220,7 @@ void ShowGameInstructions()
     mvprintw(7, COLS / 2 - 20, "                HOW TO PLAY                 ");
 
     // Instruction lines
-    std::vector<std::string> instructions = {
+    vector<string> instructions = {
         "  - Arrange the falling blocks to complete lines",
         "  - Complete lines to earn points and level up",
         "  - The game speeds up as you progress levels",
@@ -196,7 +231,7 @@ void ShowGameInstructions()
         "  UP_KEY : Rotate block",
         "  DOWN_KEY : Soft drop (move down faster)",
         "  SPACE: Hard drop (instant drop)",
-        "  P : Pause game",
+        "  S : Pause game",
         "  Ctrl+C : Quit game"};
 
     for (size_t i = 0; i < instructions.size(); i++)
@@ -337,7 +372,7 @@ void ShowCountdownAnimation()
         COORD coord = {(SHORT)startX, (SHORT)startY};
         SetConsoleCursorPosition(hConsole, coord);
         Beep(800, 300);
-        std::cout << i;
+        cout << i;
         Sleep((1000));
     }
 
@@ -345,7 +380,7 @@ void ShowCountdownAnimation()
     SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
     COORD coord = {(SHORT)(startX - 5), (SHORT)startY};
     SetConsoleCursorPosition(hConsole, coord);
-    std::cout << "Game Start!";
+    cout << "Game Start!";
     Sleep((1000));
     ClearScreen();
 
@@ -372,7 +407,7 @@ void ShowCountdownAnimation()
         mvprintw(startY, startX, "%d", i);
         attroff(COLOR_PAIR(10) | A_BOLD);
         refresh();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        this_thread::sleep_for(chrono::milliseconds(1000));
     }
 
     clear();
@@ -380,7 +415,7 @@ void ShowCountdownAnimation()
     mvprintw(startY, startX - 5, "Game Start!");
     attroff(COLOR_PAIR(9) | A_BOLD);
     refresh();
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    this_thread::sleep_for(chrono::milliseconds(1000));
     endwin();
 #endif
 }
@@ -415,7 +450,7 @@ void ShowGameOverAnimation()
         // Windows doesn't have direct blink, so we'll simulate it
         if (i % 2 == 0)
         {
-            std::cout << gameOverText;
+            cout << gameOverText;
         }
         else
         {
@@ -428,7 +463,7 @@ void ShowGameOverAnimation()
 
     // Final display
     SetConsoleCursorPosition(hConsole, {(SHORT)startX, (SHORT)startY});
-    std::cout << gameOverText;
+    cout << gameOverText;
     Sleep((1000));
 
     // Restore cursor and colors
@@ -457,10 +492,10 @@ void ShowGameOverAnimation()
         mvprintw(startY, startX, "%s", gameOverText);
         attroff(A_BLINK);
         refresh();
-        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        this_thread::sleep_for(chrono::milliseconds(400));
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    this_thread::sleep_for(chrono::milliseconds(1000));
     endwin();
 #endif
 }
@@ -633,7 +668,9 @@ public:
                 isPaused = false;
             return;
         }
-
+#ifdef _WIN32
+        FlushInputBuffer(); // Clear any buffered input when unpausing
+#endif
         switch (ch)
         {
 #ifdef _WIN32
@@ -677,6 +714,10 @@ public:
             isPaused = true;
             break;
         }
+#ifdef _WIN32
+        // Clear any additional buffered input after processing
+        FlushInputBuffer();
+#endif
     }
 
     void AppleGravity()
@@ -774,9 +815,9 @@ public:
         if (isPaused || isGameOver)
             return;
 
-        static auto lastUpdate = std::chrono::steady_clock::now();
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate).count();
+        static auto lastUpdate = chrono::steady_clock::now();
+        auto now = chrono::steady_clock::now();
+        auto elapsed = chrono::duration_cast<chrono::milliseconds>(now - lastUpdate).count();
 
         // Calculate speed based on level (faster as level increases)
         int currentSpeed = max(50, 500 - (level * 30)); // Adjust these values as needed
@@ -817,7 +858,6 @@ public:
                     return;
                 }
 
-                
                 ClearLines();
                 AppleGravity();
 
@@ -870,19 +910,22 @@ public:
             }
         }
 
-        // Draw next piece preview
-        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 1, "Next:", 15);
+        // Draw next piece preview border
+        screenBuffer.Write(FIELD_WIDTH * 2 + 4, 0, "#############", 15);
+        for (int y = 1; y <= 6; y++)
+        {
+            screenBuffer.Write(FIELD_WIDTH * 2 + 4, y, "#", 15);
+            screenBuffer.Write(FIELD_WIDTH * 2 + 16, y, "#", 15);
+        }
+        screenBuffer.Write(FIELD_WIDTH * 2 + 4, 7, "#############", 15);
+
+        // Draw next piece title
+        screenBuffer.Write(FIELD_WIDTH * 2 + 7, 1, "NEXT", 15);
 
         // Clear preview area
-        for (int y = 2; y <= 7; y++)
-        {
-            for (int x = FIELD_WIDTH * 2 + 5; x <= FIELD_WIDTH * 2 + 14; x++)
-            {
-                screenBuffer.Write(x, y, "  ", 0);
-            }
-        }
+        screenBuffer.Fill(FIELD_WIDTH * 2 + 5, 2, 10, 5, ' ', 0);
 
-        // Draw next piece
+        // Draw next piece (centered)
         int baseX = FIELD_WIDTH * 2 + 8;
         int baseY = 4;
         for (int px = 0; px < TETROMINO_SIZE; px++)
@@ -905,7 +948,12 @@ public:
 
         // Draw controls
         screenBuffer.Write(FIELD_WIDTH * 2 + 5, 13, "Controls:", 15);
-        // ... add other controls text similarly ...
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 15, "LEFT/RIGHT: Move", 15);
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 16, "UP: Rotate", 15);
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 17, "DOWN: Soft Drop", 15);
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 18, "SPACE: Hard Drop", 15);
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 19, "S: Pause", 15);
+        screenBuffer.Write(FIELD_WIDTH * 2 + 5, 20, "Ctrl + C: Quit", 15);
 
         if (isPaused)
         {
@@ -967,31 +1015,49 @@ public:
             }
         }
 
-        // Draw next piece preview
-        attron(A_BOLD);
-        mvprintw(1, FIELD_WIDTH * 2 + 5, "Next Piece:");
-        attroff(A_BOLD);
-
-        // Clear preview area (6 rows x 8 columns to fit all pieces)
-        for (int y = 2; y <= 7; y++)
+        // Draw next piece preview with border
+        attron(COLOR_PAIR(8));
+        // Top border
+        for (int x = FIELD_WIDTH * 2 + 5; x <= FIELD_WIDTH * 2 + 15; x++)
         {
-            for (int x = FIELD_WIDTH * 2 + 5; x <= FIELD_WIDTH * 2 + 12; x += 2)
+            mvprintw(1, x, "#");
+        }
+        // Bottom border
+        for (int x = FIELD_WIDTH * 2 + 5; x <= FIELD_WIDTH * 2 + 15; x++)
+        {
+            mvprintw(7, x, "#");
+        }
+        // Side borders
+        for (int y = 2; y <= 6; y++)
+        {
+            mvprintw(y, FIELD_WIDTH * 2 + 5, "#");
+            mvprintw(y, FIELD_WIDTH * 2 + 15, "#");
+        }
+        attroff(COLOR_PAIR(8));
+
+        // Next piece title
+        attron(A_BOLD | COLOR_PAIR(15));
+        mvprintw(1, FIELD_WIDTH * 2 + 8, "NEXT");
+        attroff(A_BOLD | COLOR_PAIR(15));
+
+        // Clear preview area
+        for (int y = 2; y <= 6; y++)
+        {
+            for (int x = FIELD_WIDTH * 2 + 6; x <= FIELD_WIDTH * 2 + 14; x++)
             {
-                mvprintw(y, x, "  ");
+                mvprintw(y, x, " ");
             }
         }
 
-        // Draw next piece (centered in the preview area)
-        int baseX = FIELD_WIDTH * 2 + 7; // Adjusted for better centering
-        int baseY = 4;                   // Middle of the preview area
-
+        // Draw next piece (centered)
+        int baseX = FIELD_WIDTH * 2 + 9;
+        int baseY = 4;
         for (int px = 0; px < TETROMINO_SIZE; px++)
         {
             for (int py = 0; py < TETROMINO_SIZE; py++)
             {
                 if (TETROMINOS[nextPiece][Rotate(px, py, 0)] != L'.')
                 {
-                    // Center the piece in the preview area
                     int drawX = baseX + (px - 1) * 2;
                     int drawY = baseY + (py - 1);
                     attron(COLOR_PAIR(nextPiece + 1));
@@ -1013,9 +1079,9 @@ public:
         mvprintw(14, FIELD_WIDTH * 2 + 5, "LEFT/RIGHT: Move");
         mvprintw(15, FIELD_WIDTH * 2 + 5, "UP: Rotate");
         mvprintw(16, FIELD_WIDTH * 2 + 5, "DOWN: Soft Drop");
-        mvprintw(17, FIELD_WIDTH * 2 + 5, "Space: Hard Drop");
-        mvprintw(18, FIELD_WIDTH * 2 + 5, "P: Pause");
-        mvprintw(19, FIELD_WIDTH * 2 + 5, "Ctrl+C: Quit");
+        mvprintw(17, FIELD_WIDTH * 2 + 5, "SPACE: Hard Drop");
+        mvprintw(18, FIELD_WIDTH * 2 + 5, "S: Pause");
+        mvprintw(19, FIELD_WIDTH * 2 + 5, "ESC: Quit");
 
         if (isPaused)
         {
@@ -1027,7 +1093,6 @@ public:
         refresh();
 #endif
     }
-
     bool IsGameOver() const { return isGameOver; }
     int GetScore() const { return score; }
 };
