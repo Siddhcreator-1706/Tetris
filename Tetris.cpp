@@ -482,7 +482,7 @@ void ShowGameOverAnimation()
     int startY = LINES / 2;
 
     const char *gameOverText = "GAME OVER";
-    system("ffplay -nodisp -autoexit game_start.mp3 2>/dev/null &");
+    system("ffplay -nodisp -autoexit game_over.mp3 2>/dev/null &");
     for (int i = 0; i < 5; i++)
     {
         clear();
